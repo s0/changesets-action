@@ -17,6 +17,7 @@ import * as gitUtils from "./gitUtils";
 import readChangesetState from "./readChangesetState";
 import resolveFrom from "resolve-from";
 import { throttling } from "@octokit/plugin-throttling";
+import { commitChangesFromRepo } from "@s0/ghcommit/git";
 
 // GitHub Issues/PRs messages have a max size limit on the
 // message body payload.
@@ -130,8 +131,6 @@ export async function runPublish({
     { cwd }
   );
 
-  await gitUtils.pushTags();
-
   let { packages, tool } = await getPackages(cwd);
   let releasedPackages: Package[] = [];
 
@@ -157,12 +156,19 @@ export async function runPublish({
 
     if (createGithubReleases) {
       await Promise.all(
-        releasedPackages.map((pkg) =>
-          createRelease(octokit, {
-            pkg,
-            tagName: `${pkg.packageJson.name}@${pkg.packageJson.version}`,
-          })
-        )
+        releasedPackages.map(async (pkg) => {
+          const tagName = `${pkg.packageJson.name}@${pkg.packageJson.version}`;
+          // Tag will only be created locally,
+          // Create it using the GitHub API so it's signed.
+          await octokit.rest.git.createRef({
+            ...github.context.repo,
+            ref: `refs/tags/${tagName}`,
+            sha: github.context.sha,
+          });
+          if (createGithubReleases) {
+            await createRelease(octokit, { pkg, tagName });
+          }
+        })
       );
     }
   } else {
@@ -180,11 +186,16 @@ export async function runPublish({
 
       if (match) {
         releasedPackages.push(pkg);
+        const tagName = `v${pkg.packageJson.version}`;
+        // Tag will only be created locally,
+        // Create it using the GitHub API so it's signed.
+        await octokit.rest.git.createRef({
+          ...github.context.repo,
+          ref: `refs/tags/${tagName}`,
+          sha: github.context.sha,
+        });
         if (createGithubReleases) {
-          await createRelease(octokit, {
-            pkg,
-            tagName: `v${pkg.packageJson.version}`,
-          });
+          await createRelease(octokit, { pkg, tagName });
         }
         break;
       }
@@ -324,9 +335,6 @@ export async function runVersion({
 
   let { preState } = await readChangesetState(cwd);
 
-  await gitUtils.switchToMaybeExistingBranch(versionBranch);
-  await gitUtils.reset(github.context.sha);
-
   let versionsByDirectory = await getVersionsByDirectory(cwd);
 
   if (script) {
@@ -365,16 +373,25 @@ export async function runVersion({
   );
 
   const finalPrTitle = `${prTitle}${!!preState ? ` (${preState.tag})` : ""}`;
+  const finalCommitMessage = `${commitMessage}${
+    !!preState ? ` (${preState.tag})` : ""
+  }`;
 
-  // project with `commit: true` setting could have already committed files
-  if (!(await gitUtils.checkIfClean())) {
-    const finalCommitMessage = `${commitMessage}${
-      !!preState ? ` (${preState.tag})` : ""
-    }`;
-    await gitUtils.commitAll(finalCommitMessage);
-  }
-
-  await gitUtils.push(versionBranch, { force: true });
+  await commitChangesFromRepo({
+    octokit,
+    owner: github.context.repo.owner,
+    repository: github.context.repo.repo,
+    branch: versionBranch,
+    // TODO: switch this to use direct string input when supported
+    message: {
+      headline: finalCommitMessage.split("\n", 2)[0].trim(),
+      body: finalCommitMessage.split("\n", 2)[1]?.trim(),
+    },
+    base: {
+      commit: github.context.sha,
+    },
+    force: true,
+  });
 
   let searchResult = await searchResultPromise;
   core.info(JSON.stringify(searchResult.data, null, 2));
