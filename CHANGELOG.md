@@ -1,5 +1,11 @@
 # @changesets/action
 
+## 2.1.0
+
+### Minor Changes
+
+- [`1d9e84e`](https://github.com/changesets/action/commit/1d9e84ef87c4bdcfb9b213bf20b58dd5a29604b8) Thanks [@s0](https://github.com/s0)! - Handle custom publish commands more gracefully
+
 ## 2.0.0
 
 ### Major Changes
