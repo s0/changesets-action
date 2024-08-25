@@ -1,5 +1,16 @@
 # @changesets/action
 
+## 2.0.0
+
+### Major Changes
+
+- [`c12277b`](https://github.com/changesets/action/commit/c12277b63372ecdc4a3c43915aa638e03cb20177) Thanks [@s0](https://github.com/s0)! - Start using GitHub API to push tags and commits to repos
+
+  Rather than use local git commands to push changes to GitHub,
+  this action now uses the GitHub API directly,
+  which means that all tags and commits will be attributed to the user whose
+  GITHUB_TOKEN is used, and signed.
+
 ## 1.4.7
 
 ### Patch Changes
