@@ -1,5 +1,11 @@
 # @changesets/action
 
+## 2.1.1
+
+### Patch Changes
+
+- [`1e3544f`](https://github.com/changesets/action/commit/1e3544f4685117910f287ee1761e973fbb06beb7) Thanks [@s0](https://github.com/s0)! - test a version bump
+
 ## 2.1.0
 
 ### Minor Changes
