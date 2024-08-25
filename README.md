@@ -52,7 +52,7 @@ jobs:
         run: yarn
 
       - name: Create Release Pull Request
-        uses: changesets/action@v1
+        uses: changesets/action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -89,7 +89,7 @@ jobs:
 
       - name: Create Release Pull Request or Publish to npm
         id: changesets
-        uses: changesets/action@v1
+        uses: changesets/action@v2
         with:
           # This expects you to have a script called release which does a build for your packages and calls changeset publish
           publish: yarn release
@@ -154,7 +154,7 @@ jobs:
 
       - name: Create Release Pull Request or Publish to npm
         id: changesets
-        uses: changesets/action@v1
+        uses: changesets/action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -197,7 +197,7 @@ jobs:
         run: yarn
 
       - name: Create Release Pull Request
-        uses: changesets/action@v1
+        uses: changesets/action@v2
         with:
           # this expects you to have a npm script called version that runs some logic and then calls `changeset version`.
           version: yarn version
@@ -210,7 +210,7 @@ jobs:
 If you are using [Yarn Plug'n'Play](https://yarnpkg.com/features/pnp), you should use a custom `version` command so that the action can resolve the `changeset` CLI:
 
 ```yaml
-- uses: changesets/action@v1
+- uses: changesets/action@v2
   with:
     version: yarn changeset version
     ...
