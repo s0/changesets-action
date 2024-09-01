@@ -1,5 +1,24 @@
 # @changesets/action
 
+## 2.0.0
+
+### Major Changes
+
+- [`c12277b`](https://github.com/changesets/action/commit/c12277b63372ecdc4a3c43915aa638e03cb20177) Thanks [@s0](https://github.com/s0)! - Start using GitHub API to push tags and commits to repos
+
+  Rather than use local git commands to push changes to GitHub,
+  this action now uses the GitHub API directly,
+  which means that all tags and commits will be attributed to the user whose
+  GITHUB_TOKEN is used, and signed.
+
+### Minor Changes
+
+- [`1d9e84e`](https://github.com/changesets/action/commit/1d9e84ef87c4bdcfb9b213bf20b58dd5a29604b8) Thanks [@s0](https://github.com/s0)! - Handle custom publish commands more gracefully
+
+### Patch Changes
+
+- [`a369cc5`](https://github.com/changesets/action/commit/a369cc58e808f72f1f3a5363ad1e349f1ec38c2e) Thanks [@s0](https://github.com/s0)! - Update to latest version of ghcommit
+
 ## 1.4.8
 
 ### Patch Changes
