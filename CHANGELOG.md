@@ -1,5 +1,16 @@
 # @changesets/action
 
+## 1.5.0
+
+### Minor Changes
+
+- [`35f08a8`](https://github.com/changesets/action/commit/35f08a8ee945816fcf550977183616a72fa8b2af) Thanks [@s0](https://github.com/s0)! - Introduce a new input commitUsingApi that allows pushing tags and commits
+  using the GitHub API instead of the git CLI.
+
+  When used, this means means that all tags and commits will be attributed
+  to the user whose GITHUB_TOKEN is used,
+  and also signed using GitHub's internal GPG key.
+
 ## 1.4.9
 
 ### Patch Changes
