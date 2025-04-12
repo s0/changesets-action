@@ -17,6 +17,7 @@ import * as gitUtils from "./gitUtils";
 import readChangesetState from "./readChangesetState";
 import resolveFrom from "resolve-from";
 import { throttling } from "@octokit/plugin-throttling";
+import { commitChangesFromRepo } from "@s0/ghcommit/git";
 
 // GitHub Issues/PRs messages have a max size limit on the
 // message body payload.
@@ -24,7 +25,7 @@ import { throttling } from "@octokit/plugin-throttling";
 // To avoid that, we ensure to cap the message to 60k chars.
 const MAX_CHARACTERS_PER_MESSAGE = 60000;
 
-const setupOctokit = (githubToken: string) => {
+export const setupOctokit = (githubToken: string) => {
   return new (GitHub.plugin(throttling))(
     getOctokitOptions(githubToken, {
       throttle: {
@@ -58,8 +59,10 @@ const setupOctokit = (githubToken: string) => {
   );
 };
 
+export type Octokit = ReturnType<typeof setupOctokit>;
+
 const createRelease = async (
-  octokit: ReturnType<typeof setupOctokit>,
+  octokit: Octokit,
   { pkg, tagName }: { pkg: Package; tagName: string }
 ) => {
   try {
@@ -96,10 +99,45 @@ const createRelease = async (
   }
 };
 
+export type GitTaggingStrategy = {
+  pushAllTags: () => Promise<void>;
+  pushTag: (tag: string) => Promise<void>;
+};
+
+export const getCliTaggingStrategy = (): GitTaggingStrategy => ({
+  pushAllTags: async () => {
+    await gitUtils.pushTags();
+  },
+  pushTag: async () => {
+    // When using the CLI, we push all tags together at once
+  },
+});
+
+export const getApiTaggingStrategy = (
+  octokit: Octokit
+): GitTaggingStrategy => ({
+  pushAllTags: async () => {
+    // When using the API, we push all tags individually
+  },
+  pushTag: async (tagName: string) => {
+    await octokit.rest.git
+      .createRef({
+        ...github.context.repo,
+        ref: `refs/tags/${tagName}`,
+        sha: github.context.sha,
+      })
+      .catch((err) => {
+        // Assuming tag was manually pushed in custom publish script
+        core.warning(`Failed to create tag ${tagName}: ${err.message}`);
+      });
+  },
+});
+
 type PublishOptions = {
   script: string;
-  githubToken: string;
+  octokit: Octokit;
   createGithubReleases: boolean;
+  taggingStrategy: GitTaggingStrategy;
   cwd?: string;
 };
 
@@ -116,12 +154,11 @@ type PublishResult =
 
 export async function runPublish({
   script,
-  githubToken,
+  octokit,
   createGithubReleases,
+  taggingStrategy,
   cwd = process.cwd(),
 }: PublishOptions): Promise<PublishResult> {
-  const octokit = setupOctokit(githubToken);
-
   let [publishCommand, ...publishArgs] = script.split(/\s+/);
 
   let changesetPublishOutput = await getExecOutput(
@@ -130,7 +167,7 @@ export async function runPublish({
     { cwd }
   );
 
-  await gitUtils.pushTags();
+  await taggingStrategy.pushAllTags();
 
   let { packages, tool } = await getPackages(cwd);
   let releasedPackages: Package[] = [];
@@ -157,12 +194,11 @@ export async function runPublish({
 
     if (createGithubReleases) {
       await Promise.all(
-        releasedPackages.map((pkg) =>
-          createRelease(octokit, {
-            pkg,
-            tagName: `${pkg.packageJson.name}@${pkg.packageJson.version}`,
-          })
-        )
+        releasedPackages.map(async (pkg) => {
+          const tagName = `${pkg.packageJson.name}@${pkg.packageJson.version}`;
+          await taggingStrategy.pushTag(tagName);
+          await createRelease(octokit, { pkg, tagName });
+        })
       );
     }
   } else {
@@ -181,10 +217,9 @@ export async function runPublish({
       if (match) {
         releasedPackages.push(pkg);
         if (createGithubReleases) {
-          await createRelease(octokit, {
-            pkg,
-            tagName: `v${pkg.packageJson.version}`,
-          });
+          const tagName = `v${pkg.packageJson.version}`;
+          await taggingStrategy.pushTag(tagName);
+          await createRelease(octokit, { pkg, tagName });
         }
         break;
       }
@@ -291,14 +326,54 @@ export async function getVersionPrBody({
   return fullMessage;
 }
 
+type GitPushStrategy = {
+  prepareVersionBranch: (versionBranch: string) => Promise<void>;
+  pushChanges: (params: {
+    versionBranch: string;
+    finalCommitMessage: string;
+  }) => Promise<void>;
+};
+
+export const getCliPushStrategy = (): GitPushStrategy => ({
+  prepareVersionBranch: async (versionBranch: string) => {
+    await gitUtils.switchToMaybeExistingBranch(versionBranch);
+    await gitUtils.reset(github.context.sha);
+  },
+  pushChanges: async ({ versionBranch, finalCommitMessage }) => {
+    if (!(await gitUtils.checkIfClean())) {
+      await gitUtils.commitAll(finalCommitMessage);
+    }
+    await gitUtils.push(versionBranch, { force: true });
+  },
+});
+
+export const getApiPushStrategy = (octokit: Octokit): GitPushStrategy => ({
+  prepareVersionBranch: async () => {
+    // Preparing a new local branch is not necessary when using the API
+  },
+  pushChanges: async ({ versionBranch, finalCommitMessage }) => {
+    await commitChangesFromRepo({
+      octokit,
+      ...github.context.repo,
+      branch: versionBranch,
+      message: finalCommitMessage,
+      base: {
+        commit: github.context.sha,
+      },
+      force: true,
+    });
+  },
+});
+
 type VersionOptions = {
   script?: string;
-  githubToken: string;
+  octokit: Octokit;
   cwd?: string;
   prTitle?: string;
   commitMessage?: string;
   hasPublishScript?: boolean;
   prBodyMaxCharacters?: number;
+  gitPushStrategy: GitPushStrategy;
   branch?: string;
 };
 
@@ -308,24 +383,22 @@ type RunVersionResult = {
 
 export async function runVersion({
   script,
-  githubToken,
+  octokit,
   cwd = process.cwd(),
   prTitle = "Version Packages",
   commitMessage = "Version Packages",
   hasPublishScript = false,
   prBodyMaxCharacters = MAX_CHARACTERS_PER_MESSAGE,
+  gitPushStrategy,
   branch,
 }: VersionOptions): Promise<RunVersionResult> {
-  const octokit = setupOctokit(githubToken);
-
   let repo = `${github.context.repo.owner}/${github.context.repo.repo}`;
   branch = branch ?? github.context.ref.replace("refs/heads/", "");
   let versionBranch = `changeset-release/${branch}`;
 
   let { preState } = await readChangesetState(cwd);
 
-  await gitUtils.switchToMaybeExistingBranch(versionBranch);
-  await gitUtils.reset(github.context.sha);
+  await gitPushStrategy.prepareVersionBranch(versionBranch);
 
   let versionsByDirectory = await getVersionsByDirectory(cwd);
 
@@ -367,16 +440,11 @@ export async function runVersion({
   );
 
   const finalPrTitle = `${prTitle}${!!preState ? ` (${preState.tag})` : ""}`;
+  const finalCommitMessage = `${commitMessage}${
+    !!preState ? ` (${preState.tag})` : ""
+  }`;
 
-  // project with `commit: true` setting could have already committed files
-  if (!(await gitUtils.checkIfClean())) {
-    const finalCommitMessage = `${commitMessage}${
-      !!preState ? ` (${preState.tag})` : ""
-    }`;
-    await gitUtils.commitAll(finalCommitMessage);
-  }
-
-  await gitUtils.push(versionBranch, { force: true });
+  await gitPushStrategy.pushChanges({ versionBranch, finalCommitMessage });
 
   let existingPullRequests = await existingPullRequestsPromise;
   core.info(JSON.stringify(existingPullRequests.data, null, 2));
